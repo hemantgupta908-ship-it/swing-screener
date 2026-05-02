@@ -5,117 +5,234 @@ import concurrent.futures
 
 # Import our custom modules
 from stocks_list import NIFTY_STOCKS
-from screener import fetch_stock_data, analyze_stock
+from screener import fetch_stock_data, analyze_stock, analyze_long_term_stock
 
-# Set page configuration for wide layout (better for tables and mobile)
-st.set_page_config(page_title="Swing Trading Screener", layout="wide")
+# Set page configuration for wide layout
+st.set_page_config(page_title="Swing & Long Term Screener", layout="wide")
+
+# --- PREMIUM UI CSS INJECTION ---
+st.markdown("""
+<style>
+    /* Global Font and Background */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Gradient Title */
+    h1 {
+        background: -webkit-linear-gradient(45deg, #FF6B6B, #4ECDC4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800 !important;
+        padding-bottom: 10px;
+    }
+
+    /* Glassmorphism Metric Cards */
+    [data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+        color: #4ECDC4 !important;
+        font-weight: 800;
+    }
+    div[data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        padding: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s ease-in-out;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-5px);
+    }
+
+    /* Buttons Styling */
+    div.stButton > button {
+        background: linear-gradient(90deg, #4ECDC4, #556270);
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 10px 24px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(90deg, #556270, #4ECDC4);
+        box-shadow: 0 5px 15px rgba(78, 205, 196, 0.4);
+        border-color: transparent;
+        color: white;
+    }
+
+    /* Expander Styling */
+    .streamlit-expanderHeader {
+        font-weight: 600;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+    }
+    
+    /* Tabs Styling */
+    [data-baseweb="tab"] {
+        font-weight: 600;
+    }
+    [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- APP HEADER ---
-st.title("📈 Swing Trading Screener — Nifty 500")
+st.title("📈 Pro Screener: Nifty 500")
 st.markdown("""
-This app screens top Nifty stocks for swing trading opportunities based on Trend, Momentum, Volume, and Price Action.
-""")
+<div style="font-size:1.1rem; color:#A0AEC0; margin-bottom: 20px;">
+An advanced technical screener to identify high-probability Swing Trading setups and solid Long-Term Investment opportunities.
+</div>
+""", unsafe_allow_html=True)
 
-# --- SIDEBAR CONTROLS ---
-st.sidebar.header("⚙️ Screener Settings")
+# --- MAIN TABS ---
+tab1, tab2 = st.tabs(["⚡ Swing Trading", "🏦 Long Term Investing"])
 
-min_score = st.sidebar.slider("Minimum Score Filter (Max 16)", min_value=10, max_value=16, value=12, step=1)
-rsi_range = st.sidebar.slider("RSI Range Filter", min_value=40, max_value=80, value=(50, 70))
-min_vol_mult = st.sidebar.slider("Min Volume Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
-max_risk_pct = st.sidebar.slider("Max Risk % Allowed", min_value=1, max_value=8, value=5, step=1)
+# ==========================================
+# TAB 1: SWING TRADING
+# ==========================================
+with tab1:
+    st.subheader("Swing Trading Filters")
+    # Filters in columns for a dashboard feel
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    with col_s1:
+        min_score = st.slider("Min Score (Max 16)", 10, 16, 12, 1, key='swing_score')
+    with col_s2:
+        rsi_range = st.slider("RSI Range", 40, 80, (50, 70), key='swing_rsi')
+    with col_s3:
+        min_vol_mult = st.slider("Min Volume Mult.", 1.0, 3.0, 1.5, 0.1, key='swing_vol')
+    with col_s4:
+        max_risk_pct = st.slider("Max Risk %", 1, 8, 5, 1, key='swing_risk')
 
-run_button = st.sidebar.button("🚀 Run Screener", type="primary")
+    run_swing = st.button("🚀 Run Swing Screener", use_container_width=True)
 
-# --- MAIN LOGIC ---
-if run_button:
-    # 1. Initialize Progress Tracking
-    progress_bar = st.progress(0, text="Starting stock scan...")
-    
-    passed_stocks = []
-    total_symbols = len(NIFTY_STOCKS)
-    
-    # 2. Parallel Processing
-    # We use ThreadPoolExecutor to fetch and process stocks in parallel for speed.
-    completed_count = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        # Submit all fetching tasks
-        future_to_symbol = {executor.submit(fetch_stock_data, sym): sym for sym in NIFTY_STOCKS}
+    if run_swing:
+        progress_bar = st.progress(0, text="Starting Swing Scan...")
+        passed_stocks = []
+        total_symbols = len(NIFTY_STOCKS)
+        completed_count = 0
         
-        for future in concurrent.futures.as_completed(future_to_symbol):
-            df, sym = future.result()
-            completed_count += 1
-            
-            # Update progress bar
-            progress_bar.progress(completed_count / total_symbols, text=f"Scanning {sym} ({completed_count}/{total_symbols})...")
-            
-            if df is not None:
-                # Analyze the stock
-                analysis = analyze_stock(df, sym)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_symbol = {executor.submit(fetch_stock_data, sym): sym for sym in NIFTY_STOCKS}
+            for future in concurrent.futures.as_completed(future_to_symbol):
+                df, sym = future.result()
+                completed_count += 1
+                progress_bar.progress(completed_count / total_symbols, text=f"Scanning {sym} ({completed_count}/{total_symbols})...")
                 
-                # Apply user-selected filters
-                if analysis is not None:
-                    if (analysis['Score'] >= min_score and 
-                        analysis['Risk %'] <= max_risk_pct and 
-                        analysis['Vol Ratio'] >= min_vol_mult and
-                        rsi_range[0] <= analysis['RSI'] <= rsi_range[1]):
-                        
-                        passed_stocks.append(analysis)
+                if df is not None:
+                    analysis = analyze_stock(df, sym)
+                    if analysis is not None:
+                        if (analysis['Score'] >= min_score and 
+                            analysis['Risk %'] <= max_risk_pct and 
+                            analysis['Vol Ratio'] >= min_vol_mult and
+                            rsi_range[0] <= analysis['RSI'] <= rsi_range[1]):
+                            passed_stocks.append(analysis)
 
-    progress_bar.empty() # Clear the progress bar when done
-    
-    # 3. Sort Results
-    passed_stocks.sort(key=lambda x: x['Score'], reverse=True)
-    
-    # 4. Display Metrics
-    st.subheader("📊 Scan Results")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Stocks Scanned", total_symbols)
-    col2.metric("Stocks Passed", len(passed_stocks))
-    col3.metric("Last Updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    
-    if len(passed_stocks) > 0:
-        # 5. Display Table
-        df_results = pd.DataFrame(passed_stocks)
+        progress_bar.empty()
+        passed_stocks.sort(key=lambda x: x['Score'], reverse=True)
         
-        # We don't want to display the "Reasons" list directly in the table
-        display_cols = ['Symbol', 'Current Price', 'Score', 'RSI', 'Vol Ratio', 'ADX', 
-                        'Entry Price', 'Stop Loss', 'Target Price', 'Risk %', 'Reward %', 'RR Ratio']
+        st.markdown("### 📊 Scan Results")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Stocks Scanned", total_symbols)
+        m2.metric("Stocks Passed", len(passed_stocks))
+        m3.metric("Last Updated", datetime.now().strftime("%H:%M:%S"))
         
-        df_display = df_results[display_cols]
-        
-        # Function to color code scores
-        def highlight_score(val):
-            if isinstance(val, int):
-                if val >= 14:
-                    return 'background-color: rgba(0, 255, 0, 0.2)' # Green
-                elif val >= 12:
-                    return 'background-color: rgba(255, 255, 0, 0.2)' # Yellow
-            return ''
+        if len(passed_stocks) > 0:
+            df_results = pd.DataFrame(passed_stocks)
+            display_cols = ['Symbol', 'Current Price', 'Score', 'RSI', 'Vol Ratio', 'ADX', 
+                            'Entry Price', 'Stop Loss', 'Target Price', 'Risk %', 'Reward %', 'RR Ratio']
+            df_display = df_results[display_cols]
             
-        styled_df = df_display.style.map(highlight_score, subset=['Score'])
-        
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        
-        # 6. CSV Download Button
-        csv = df_display.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Results as CSV",
-            data=csv,
-            file_name=f"swing_screener_results_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
-        
-        # 7. "Why This Stock?" Expanders
-        st.subheader("💡 Why This Stock?")
-        for stock in passed_stocks:
-            with st.expander(f"{stock['Symbol']} — Score: {stock['Score']}/16"):
-                for reason in stock['Reasons']:
-                    st.markdown(f"- ✅ {reason}")
+            def highlight_score(val):
+                if isinstance(val, int):
+                    if val >= 14: return 'background-color: rgba(78, 205, 196, 0.2)'
+                    elif val >= 12: return 'background-color: rgba(255, 206, 86, 0.2)'
+                return ''
                 
-    else:
-        st.warning("No stocks passed the criteria. Try relaxing the filters in the sidebar.")
-else:
-    st.info("👈 Adjust your settings in the sidebar and click 'Run Screener' to start.")
+            styled_df = df_display.style.map(highlight_score, subset=['Score'])
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("### 💡 Why This Stock?")
+            for stock in passed_stocks:
+                with st.expander(f"**{stock['Symbol']}** — Score: {stock['Score']}/16"):
+                    for reason in stock['Reasons']:
+                        st.markdown(f"- ✅ {reason}")
+        else:
+            st.warning("No stocks passed the criteria. Try relaxing the filters.")
+
+
+# ==========================================
+# TAB 2: LONG TERM INVESTING
+# ==========================================
+with tab2:
+    st.subheader("Long Term Investing Filters")
+    col_l1, col_l2, col_l3 = st.columns(3)
+    with col_l1:
+        min_lt_score = st.slider("Min LT Score (Max 10)", 5, 10, 7, 1, key='lt_score')
+    with col_l2:
+        max_dist_high = st.slider("Max Distance from 52W High %", 5, 30, 20, 1, key='lt_dist')
+    with col_l3:
+        lt_rsi_range = st.slider("RSI Range", 30, 80, (45, 65), key='lt_rsi')
+
+    run_longterm = st.button("🏦 Run Long Term Screener", use_container_width=True)
+
+    if run_longterm:
+        progress_bar_lt = st.progress(0, text="Starting Long Term Scan...")
+        passed_lt_stocks = []
+        total_symbols = len(NIFTY_STOCKS)
+        completed_count = 0
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_symbol = {executor.submit(fetch_stock_data, sym): sym for sym in NIFTY_STOCKS}
+            for future in concurrent.futures.as_completed(future_to_symbol):
+                df, sym = future.result()
+                completed_count += 1
+                progress_bar_lt.progress(completed_count / total_symbols, text=f"Scanning {sym} ({completed_count}/{total_symbols})...")
+                
+                if df is not None:
+                    analysis = analyze_long_term_stock(df, sym)
+                    if analysis is not None:
+                        if (analysis['Score'] >= min_lt_score and 
+                            analysis['Dist from High %'] <= max_dist_high and 
+                            lt_rsi_range[0] <= analysis['RSI'] <= lt_rsi_range[1]):
+                            passed_lt_stocks.append(analysis)
+
+        progress_bar_lt.empty()
+        passed_lt_stocks.sort(key=lambda x: x['Score'], reverse=True)
+        
+        st.markdown("### 📊 Scan Results")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Stocks Scanned", total_symbols)
+        m2.metric("Stocks Passed", len(passed_lt_stocks))
+        m3.metric("Last Updated", datetime.now().strftime("%H:%M:%S"))
+        
+        if len(passed_lt_stocks) > 0:
+            df_results_lt = pd.DataFrame(passed_lt_stocks)
+            display_cols_lt = ['Symbol', 'Current Price', 'Score', 'RSI', 'Dist from High %', 
+                            'Entry Price', 'Stop Loss', 'Target Price', 'Risk %', 'Reward %', 'RR Ratio']
+            df_display_lt = df_results_lt[display_cols_lt]
+            
+            def highlight_score_lt(val):
+                if isinstance(val, int):
+                    if val >= 8: return 'background-color: rgba(78, 205, 196, 0.2)'
+                    elif val >= 6: return 'background-color: rgba(255, 206, 86, 0.2)'
+                return ''
+                
+            styled_df_lt = df_display_lt.style.map(highlight_score_lt, subset=['Score'])
+            st.dataframe(styled_df_lt, use_container_width=True, hide_index=True)
+            
+            st.markdown("### 💡 Why This Stock?")
+            for stock in passed_lt_stocks:
+                with st.expander(f"**{stock['Symbol']}** — Score: {stock['Score']}/10"):
+                    for reason in stock['Reasons']:
+                        st.markdown(f"- ✅ {reason}")
+        else:
+            st.warning("No stocks passed the criteria. Try relaxing the filters.")
+
 
 # --- FOOTER DISCLAIMER ---
 st.markdown("---")
