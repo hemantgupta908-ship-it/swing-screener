@@ -7,17 +7,29 @@ import concurrent.futures
 
 @st.cache_data(ttl=14400, show_spinner=False)
 def fetch_stock_data(symbol):
+    """
+    Fetches 2 years of daily data for a given symbol using yfinance.
+    Cached for 4 hours to prevent repeated downloads.
+    """
     try:
-        df = yf.download(symbol, period='1y', interval='1d', progress=False)
+        # Download 2 years of daily data for long term MAs
+        df = yf.download(symbol, period='2y', interval='1d', progress=False)
         if df.empty or len(df) < 50:
             return None, symbol
+        
+        # Flatten MultiIndex columns if yfinance returns them
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+            
         return df, symbol
     except Exception as e:
         return None, symbol
 
 def analyze_stock(df, symbol):
+    """
+    Analyzes the stock data based on the defined SWING criteria.
+    Score is out of 16.
+    """
     try:
         df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200)
@@ -107,6 +119,80 @@ def analyze_stock(df, symbol):
             'Risk %': round(risk_percent, 2),
             'Reward %': round(reward_percent, 2),
             'RR Ratio': '1:2.5',
+            'Reasons': reasons
+        }
+    except Exception as e:
+        return None
+
+
+def analyze_long_term_stock(df, symbol):
+    """
+    Analyzes the stock data based on LONG TERM investing criteria.
+    Score is out of 10.
+    """
+    try:
+        # Calculate Technical Indicators
+        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
+        df['EMA_200'] = ta.trend.ema_indicator(df['Close'], window=200)
+        df['RSI_14'] = ta.momentum.rsi(df['Close'], window=14)
+        df['High_52W'] = df['High'].rolling(window=252, min_periods=50).max()
+
+        latest = df.iloc[-1]
+        score = 0
+        reasons = []
+
+        # Criteria 1 - Golden Cross / Uptrend (Max +4)
+        if pd.notna(latest['EMA_200']) and pd.notna(latest['EMA_50']):
+            if latest['EMA_50'] > latest['EMA_200']:
+                score += 2
+                reasons.append("Golden Cross: 50 EMA is above 200 EMA")
+            if latest['Close'] > latest['EMA_50']:
+                score += 2
+                reasons.append("Price is firmly above 50 EMA")
+
+        # Criteria 2 - Price Structure (Max +3)
+        distance_to_high = 0
+        if pd.notna(latest['High_52W']):
+            distance_to_high = (latest['High_52W'] - latest['Close']) / latest['High_52W']
+            if distance_to_high <= 0.20:
+                score += 3
+                reasons.append("Price is within 20% of 52-week high")
+
+        # Criteria 3 - Steady Momentum (Max +3)
+        rsi_val = latest['RSI_14']
+        if pd.notna(rsi_val) and 45 <= rsi_val <= 65:
+            score += 3
+            reasons.append(f"Steady RSI ({rsi_val:.2f}): Healthy growth without being overbought")
+
+        # Risk-Reward for Long Term (using a 15% trailing stop or below 200 EMA)
+        entry_price = latest['Close']
+        
+        # Use 200 EMA as stop loss if it's reasonable, else 15% drop
+        if pd.notna(latest['EMA_200']) and latest['EMA_200'] < entry_price:
+            stop_loss = latest['EMA_200']
+        else:
+            stop_loss = entry_price * 0.85 # 15% default stop
+
+        risk_amount = entry_price - stop_loss
+        if risk_amount <= 0:
+            return None
+            
+        target_price = entry_price + (3.0 * risk_amount) # 1:3 RR for long term
+        risk_percent = (risk_amount / entry_price) * 100
+        reward_percent = ((target_price - entry_price) / entry_price) * 100
+
+        return {
+            'Symbol': symbol.replace('.NS', ''),
+            'Current Price': round(entry_price, 2),
+            'Score': score,
+            'RSI': round(rsi_val, 2) if pd.notna(rsi_val) else 0,
+            'Dist from High %': round(distance_to_high * 100, 2) if pd.notna(latest['High_52W']) else 0,
+            'Entry Price': round(entry_price, 2),
+            'Stop Loss': round(stop_loss, 2),
+            'Target Price': round(target_price, 2),
+            'Risk %': round(risk_percent, 2),
+            'Reward %': round(reward_percent, 2),
+            'RR Ratio': '1:3.0',
             'Reasons': reasons
         }
     except Exception as e:
